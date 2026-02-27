@@ -1,0 +1,58 @@
+# Databricks Asset Bundle definition for prompt_playground.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+bundle:
+  name: prompt_playground
+  uuid: 69a38b28-0b23-4240-9e26-39ac497080f0
+  databricks_cli_version: ">= 0.220.0"
+
+sync:
+  exclude:
+    - '*.lvdash.json'
+    - '**/__pycache__'
+    - '**/*.pyc'
+    - '**/.pytest_cache'
+    - 'src/frontend/node_modules/'
+    - 'src/frontend/tsconfig.tsbuildinfo'
+    - '.venv/'
+
+variables:
+  warehouse_id:
+    description: "SQL Warehouse for eval dataset queries"
+    lookup:
+      warehouse: "Serverless Starter Warehouse"   # replace with your warehouse name if different
+
+  serving_endpoint:
+    description: "Model serving endpoint name — common options: databricks-claude-sonnet-4-5, databricks-claude-haiku-3-5, databricks-meta-llama-3-3-70b-instruct"
+    default: "databricks-claude-sonnet-4-5"
+
+resources:
+  apps:
+    prompt_playground:
+      name: "prompt-playground"
+      description: "Prompt Playground — iterate on MLflow Prompt Registry prompts and run batch evaluations without writing code"
+      source_code_path: ./src
+
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: serving-endpoint
+          serving_endpoint:
+            name: ${var.serving_endpoint}
+            permission: CAN_QUERY
+
+targets:
+  dev:
+    default: true
+    mode: development
+    # workspace.host is read from your active Databricks CLI profile.
+    # Run: databricks auth login --host https://<your-workspace>.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
+    # Uncomment to run as a service principal in production:
+    # run_as:
+    #   service_principal_name: sp-prod-deployer@your-org.com

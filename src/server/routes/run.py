@@ -1,0 +1,171 @@
+"""API routes for running prompts against models."""
+
+import logging
+import mlflow
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from server.mlflow_client import get_prompt_template
+from server.templates import render_template, parse_template_variables
+from server.mlflow_helpers import configure_mlflow, get_experiment_id, experiment_url, get_mlflow_client
+from server.llm import call_model
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["run"])
+
+
+class RunRequest(BaseModel):
+    prompt_name: str
+    prompt_version: str
+    variables: dict[str, str] = {}
+    model_name: str
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    experiment_name: str | None = None
+    draft_template: str | None = None
+
+
+class RunResponse(BaseModel):
+    rendered_prompt: str
+    response: str
+    model: str
+    usage: dict = {}
+    run_id: str | None = None
+    experiment_url: str | None = None
+
+
+def _load_prompt_data(request: RunRequest) -> dict:
+    """Load prompt template from registry or use draft."""
+    if request.draft_template is not None:
+        return {
+            "template": request.draft_template,
+            "variables": parse_template_variables(request.draft_template),
+        }
+    try:
+        return get_prompt_template(request.prompt_name, request.prompt_version)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading prompt: {e}")
+
+
+def _log_run_artifacts(run_id: str, rendered: str, result: dict, request: RunRequest):
+    """Log artifacts, metrics, and link prompt version to the MLflow run."""
+    mlflow.log_text(rendered, "rendered_prompt.txt")
+    mlflow.log_text(result["content"], "response.txt")
+    usage = result.get("usage", {})
+    if usage:
+        mlflow.log_metrics({k: v for k, v in usage.items() if isinstance(v, (int, float))})
+
+    if request.draft_template is None:
+        try:
+            client = get_mlflow_client()
+            prompt_version_obj = client.get_prompt_version(
+                name=request.prompt_name,
+                version=request.prompt_version,
+            )
+            client.link_prompt_version_to_run(
+                run_id=run_id,
+                prompt=prompt_version_obj,
+            )
+        except Exception as e:
+            logger.warning("link_prompt_version_to_run failed (non-fatal): %s", e)
+
+
+@router.post("/run", response_model=RunResponse)
+async def api_run_prompt(request: RunRequest):
+    """Run a prompt with variable substitution against a selected model."""
+    prompt_data = _load_prompt_data(request)
+    rendered = render_template(prompt_data["template"], request.variables)
+
+    # Call model inside an MLflow trace so it appears in the Traces tab
+    run_id = None
+    exp_url = None
+    result = None
+
+    try:
+        configure_mlflow()
+        exp_id = get_experiment_id(request.experiment_name)
+        run_name = f"{request.prompt_name.split('.')[-1]}-v{request.prompt_version}"
+
+        with mlflow.start_run(experiment_id=exp_id, run_name=run_name) as run:
+            mlflow.set_tags({
+                "mlflow.runName": run_name,
+                "prompt_name": request.prompt_name,
+                "prompt_version": request.prompt_version,
+                "model": request.model_name,
+                "is_draft": str(request.draft_template is not None).lower(),
+            })
+            mlflow.log_params({k: v[:250] for k, v in request.variables.items()})
+            mlflow.log_param("model_name", request.model_name)
+            mlflow.log_param("prompt_version", request.prompt_version)
+
+            # Trace the LLM call as a span so it shows in the Traces tab
+            with mlflow.start_span(name="llm_call", span_type="LLM") as span:
+                span.set_inputs({"prompt": rendered, "model": request.model_name})
+                try:
+                    result = await call_model(
+                        endpoint_name=request.model_name,
+                        prompt=rendered,
+                        max_tokens=request.max_tokens,
+                        temperature=request.temperature,
+                    )
+                except Exception as e:
+                    span.set_status("ERROR")
+                    raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+                span.set_outputs({"response": result["content"], "usage": result.get("usage", {})})
+
+            _log_run_artifacts(run.info.run_id, rendered, result, request)
+
+            run_id = run.info.run_id
+
+        if exp_id:
+            exp_url = experiment_url(exp_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("MLflow logging failed (non-fatal): %s", e)
+        if result is None:
+            try:
+                result = await call_model(
+                    endpoint_name=request.model_name,
+                    prompt=rendered,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                )
+            except Exception as model_err:
+                raise HTTPException(status_code=502, detail=f"Model call failed: {model_err}")
+
+    return RunResponse(
+        rendered_prompt=rendered,
+        response=result["content"],
+        model=result["model"],
+        usage=result["usage"],
+        run_id=run_id,
+        experiment_url=exp_url,
+    )
+
+
+class PreviewRequest(BaseModel):
+    prompt_name: str
+    prompt_version: str
+    variables: dict[str, str] = {}
+
+
+@router.post("/preview")
+async def api_preview_prompt(request: PreviewRequest):
+    """Preview a rendered prompt without calling a model."""
+    try:
+        prompt_data = get_prompt_template(request.prompt_name, request.prompt_version)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading prompt: {e}")
+
+    rendered = render_template(prompt_data["template"], request.variables)
+    return {
+        "rendered_prompt": rendered,
+        "template": prompt_data["template"],
+        "variables": prompt_data["variables"],
+    }

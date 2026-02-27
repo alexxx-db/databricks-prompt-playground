@@ -1,0 +1,275 @@
+import { useState, useEffect } from 'react';
+import { CheckCircle, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import { useCreateJudge, useJudgeDetail } from '../../hooks/useEvalApi';
+
+type JudgeType = 'custom' | 'guidelines';
+
+interface Props {
+  experimentName: string;
+  editingJudge?: string | null;
+  onSaved: (name: string) => void;
+  onCancel: () => void;
+}
+
+export default function JudgeForm({ experimentName, editingJudge, onSaved, onCancel }: Props) {
+  const isEdit = !!editingJudge;
+  const [name, setName] = useState(editingJudge || '');
+  const [judgeType, setJudgeType] = useState<JudgeType>('custom');
+  const [instructions, setInstructions] = useState('');
+  const [guidelines, setGuidelines] = useState<string[]>(['']);
+  const [savedOk, setSavedOk] = useState(false);
+  const { create, loading, error } = useCreateJudge();
+  const { detail, loading: detailLoading } = useJudgeDetail(editingJudge ?? null);
+
+  useEffect(() => {
+    if (!detail) return;
+    setJudgeType(detail.type);
+    if (detail.type === 'custom' && detail.instructions) {
+      setInstructions(detail.instructions);
+    } else if (detail.type === 'guidelines' && detail.guidelines?.length) {
+      setGuidelines(detail.guidelines);
+    }
+  }, [detail]);
+
+  const handleSave = async () => {
+    setSavedOk(false);
+    try {
+      const params: Record<string, unknown> = {
+        name: name.trim(),
+        type: judgeType,
+        experiment_name: experimentName || undefined,
+        is_update: isEdit,
+      };
+      if (judgeType === 'custom') {
+        params.instructions = instructions.trim();
+      } else {
+        params.guidelines = guidelines.map((g) => g.trim()).filter(Boolean);
+      }
+      await create(params as Parameters<typeof create>[0]);
+      if (isEdit) setSavedOk(true);
+      onSaved(name.trim());
+    } catch {
+      /* error captured in hook */
+    }
+  };
+
+  const addGuideline = () => { setSavedOk(false); setGuidelines((prev) => [...prev, '']); };
+  const removeGuideline = (idx: number) => { setSavedOk(false); setGuidelines((prev) => prev.filter((_, i) => i !== idx)); };
+  const updateGuideline = (idx: number, val: string) => { setSavedOk(false); setGuidelines((prev) => prev.map((g, i) => (i === idx ? val : g))); };
+
+  const NAME_RE = /^[a-z][a-z0-9_]*$/;
+  const nameError = name.trim().length > 0 && !NAME_RE.test(name.trim())
+    ? 'Use lowercase letters, digits, and underscores only. Must start with a letter.'
+    : null;
+
+  const isValid =
+    name.trim().length > 0 &&
+    !nameError &&
+    (judgeType === 'custom'
+      ? instructions.trim().length > 0
+      : guidelines.some((g) => g.trim().length > 0));
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/30 z-40"
+        onClick={onCancel}
+      />
+
+      {/* Slide-over panel */}
+      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-2xl flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">
+              {isEdit ? 'Edit Judge' : 'Create a Judge'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              A judge is an AI that scores your model's responses during evaluation.
+            </p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+          {detailLoading ? (
+            <div className="flex items-center justify-center py-12 gap-2 text-sm text-gray-500">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading judge details...
+            </div>
+          ) : (
+            <>
+              {/* Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Judge Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. tone_check, relevance_scorer"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  readOnly={isEdit}
+                  className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:border-transparent ${
+                    isEdit
+                      ? 'border-gray-300 bg-gray-50 text-gray-500 cursor-not-allowed'
+                      : nameError
+                        ? 'border-red-300 focus:ring-red-300'
+                        : 'border-gray-300 focus:ring-databricks-red'
+                  }`}
+                />
+                {!isEdit && (
+                  nameError
+                    ? <p className="mt-1 text-xs text-red-500">{nameError}</p>
+                    : <p className="mt-1 text-xs text-gray-400">Use lowercase letters, digits, and underscores. Must start with a letter.</p>
+                )}
+              </div>
+
+              {/* Type selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Judge Type
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => { setSavedOk(false); setJudgeType('custom'); }}
+                    className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                      judgeType === 'custom'
+                        ? 'border-databricks-red bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-sm font-medium ${judgeType === 'custom' ? 'text-databricks-red' : 'text-gray-700'}`}>
+                      Custom
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Write free-form instructions for what to evaluate
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => { setSavedOk(false); setJudgeType('guidelines'); }}
+                    className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                      judgeType === 'guidelines'
+                        ? 'border-databricks-red bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-sm font-medium ${judgeType === 'guidelines' ? 'text-databricks-red' : 'text-gray-700'}`}>
+                      Guidelines
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Define a list of specific rules to check
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Custom: instructions textarea */}
+              {judgeType === 'custom' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Instructions
+                  </label>
+                  <textarea
+                    placeholder={`Tell the judge what to look for and how to score it. For example:\n\n"Evaluate whether the response is written in a friendly, conversational tone. Score 1 if it sounds robotic or overly formal, and 5 if it feels warm and approachable."`}
+                    value={instructions}
+                    onChange={(e) => { setSavedOk(false); setInstructions(e.target.value); }}
+                    rows={8}
+                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-databricks-red focus:border-transparent resize-none"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    Be specific — describe what a good (5) and bad (1) response looks like.
+                  </p>
+                </div>
+              )}
+
+              {/* Guidelines: list of rules */}
+              {judgeType === 'guidelines' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Rules
+                  </label>
+                  <div className="space-y-2">
+                    {guidelines.map((g, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          placeholder={`Rule ${idx + 1} — e.g. "Response must not contain profanity"`}
+                          value={g}
+                          onChange={(e) => updateGuideline(idx, e.target.value)}
+                          className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-databricks-red focus:border-transparent"
+                        />
+                        {guidelines.length > 1 && (
+                          <button
+                            onClick={() => removeGuideline(idx)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      onClick={addGuideline}
+                      className="text-sm text-databricks-red hover:text-red-700 font-medium"
+                    >
+                      + Add another rule
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-400">
+                    Each rule is checked independently. The score reflects how many rules the response passes.
+                  </p>
+                </div>
+              )}
+
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {savedOk && (
+          <div className="px-6 pt-3 -mb-1">
+            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              Judge updated — changes will apply to the next evaluation run.
+            </div>
+          </div>
+        )}
+        <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!isValid || loading || detailLoading}
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-databricks-red text-white text-sm font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-700 transition-colors"
+          >
+            {loading ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> {isEdit ? 'Updating...' : 'Creating...'}</>
+            ) : isEdit ? (
+              <><Save className="w-4 h-4" /> Update Judge</>
+            ) : (
+              <><Plus className="w-4 h-4" /> Create Judge</>
+            )}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
