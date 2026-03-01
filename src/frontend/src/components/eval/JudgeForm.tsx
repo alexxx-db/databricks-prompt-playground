@@ -115,14 +115,9 @@ export default function JudgeForm({ experimentName, editingJudge, onSaved, onCan
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">
-              {isEdit ? 'Edit Judge' : 'Create a Judge'}
-            </h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              A judge is an AI that scores your model's responses during evaluation.
-            </p>
-          </div>
+          <h2 className="text-base font-semibold text-gray-900">
+            {isEdit ? 'Edit Judge' : 'Create a Judge'}
+          </h2>
           <button
             onClick={onCancel}
             className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
@@ -147,7 +142,7 @@ export default function JudgeForm({ experimentName, editingJudge, onSaved, onCan
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Tone Check, GuidelinesKT"
+                  placeholder="Judge name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   readOnly={isEdit}
@@ -159,10 +154,8 @@ export default function JudgeForm({ experimentName, editingJudge, onSaved, onCan
                         : 'border-gray-300 focus:ring-databricks-red'
                   }`}
                 />
-                {!isEdit && (
-                  nameError
-                    ? <p className="mt-1 text-xs text-red-500">{nameError}</p>
-                    : <p className="mt-1 text-xs text-gray-400">Any name works — spaces and uppercase are allowed.</p>
+                {!isEdit && nameError && (
+                  <p className="mt-1 text-xs text-red-500">{nameError}</p>
                 )}
               </div>
 
