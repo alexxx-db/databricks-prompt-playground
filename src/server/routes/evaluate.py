@@ -4,7 +4,7 @@ import logging
 import asyncio
 import mlflow
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from server.mlflow_client import get_prompt_template
 from server.templates import render_template
 from server.mlflow_helpers import configure_mlflow, get_experiment_id, experiment_url, get_mlflow_client, EXPERIMENT_NAME
@@ -149,7 +149,7 @@ async def api_get_judge_detail(name: str):
 
 
 class CreateJudgeRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     type: str = "custom"  # "custom" | "guidelines"
     instructions: str | None = None       # for type="custom"
     guidelines: list[str] | None = None   # for type="guidelines"
