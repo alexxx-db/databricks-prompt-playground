@@ -76,9 +76,11 @@ def render_template(template: str, variables: dict[str, str]) -> str:
     """Substitute {{variable}} placeholders with provided values."""
     result = template
     for key, value in variables.items():
+        # Use a lambda so the replacement value is treated as a literal string,
+        # not a regex replacement pattern (which would interpret \1, \g<name>, etc.).
         result = re.sub(
             r"\{\{\s*" + re.escape(key) + r"\s*\}\}",
-            value,
+            lambda _, v=value: v,
             result,
         )
     return result

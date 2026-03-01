@@ -5,7 +5,7 @@ Covers:
 - _resolve_scorers falls back judge_model to model_name when not specified
 - _resolve_scorers passes judge_model and judge_temperature to QualityScorer
 - EvalRequest accepts judge_model and judge_temperature with correct defaults
-- CreateJudgeRequest validates name format
+- CreateJudgeRequest accepts any non-empty name (spaces and uppercase allowed)
 """
 
 import pytest
@@ -152,8 +152,14 @@ BASE_JUDGE_KWARGS = dict(type="custom", instructions="Score it.")
 @pytest.mark.parametrize("name", [
     "tone_check",
     "relevance_scorer",
-    "my_judge",
-    "judge1",
+    "Tone Check",          # spaces allowed
+    "ToneCheck",           # uppercase allowed
+    "GuidelinesKT",        # mixed case allowed
+    "1judge",              # starts with digit allowed
+    "_judge",              # starts with underscore allowed
+    "tone-check",          # hyphen allowed
+    "tone.check",          # dot allowed
+    "judge!",              # special char allowed
     "a",
     "abc123",
 ])
@@ -162,17 +168,6 @@ def test_create_judge_request_valid_names(name):
     assert req.name == name
 
 
-@pytest.mark.parametrize("name", [
-    "Tone Check",          # spaces + uppercase
-    "tone check",          # space
-    "ToneCheck",           # uppercase
-    "1judge",              # starts with digit
-    "_judge",              # starts with underscore
-    "tone-check",          # hyphen
-    "tone.check",          # dot
-    "",                    # empty
-    "judge!",              # special char
-])
-def test_create_judge_request_invalid_names(name):
+def test_create_judge_request_empty_name_invalid():
     with pytest.raises(ValidationError):
-        CreateJudgeRequest(name=name, **BASE_JUDGE_KWARGS)
+        CreateJudgeRequest(name="", **BASE_JUDGE_KWARGS)
