@@ -178,6 +178,8 @@ export default function App() {
     )
   );
 
+  const unfilledVars = editor.activeVariables.filter(v => !variableValues[v]?.trim());
+
   if (configLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-50">
@@ -308,6 +310,7 @@ export default function App() {
                 loading={runLoading}
                 onRun={handleRun}
                 onReset={reset}
+                unfilledVars={unfilledVars}
               />
             </div>
           </div>
