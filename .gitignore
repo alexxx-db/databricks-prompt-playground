@@ -6,3 +6,4 @@ node_modules/
 src/frontend/tsconfig.tsbuildinfo
 .databricks/
 .DS_Store
+docs/
