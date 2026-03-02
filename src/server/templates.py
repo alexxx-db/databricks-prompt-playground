@@ -80,7 +80,7 @@ def render_template(template: str, variables: dict[str, str]) -> str:
         # not a regex replacement pattern (which would interpret \1, \g<name>, etc.).
         result = re.sub(
             r"\{\{\s*" + re.escape(key) + r"\s*\}\}",
-            lambda _, v=value: v,
+            lambda m, v=value: v,
             result,
         )
     return result
