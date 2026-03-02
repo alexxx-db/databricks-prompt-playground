@@ -2,13 +2,27 @@
 
 A Databricks App for browsing, running, and evaluating prompts from the [MLflow Prompt Registry](https://docs.databricks.com/aws/en/mlflow3/genai/prompt-version-mgmt/prompt-registry/) — no code required.
 
-**Features:**
-- **Playground** — pick a prompt version, fill in template variables, call a model endpoint, see the response
-- **Create & Edit Prompts** — register a brand-new prompt or save a new version directly from the UI — no Python required
-- **Evaluate** — run a prompt against a Unity Catalog Delta table dataset and score results with `mlflow.evaluate()`
-- **Experiment filtering** — scope the prompt dropdown to prompts that have been run in a specific MLflow experiment
-- **Searchable dropdowns** — filter-as-you-type selectors for prompts, models, and experiments
-- **How to Use** — inline onboarding guide
+**Prompts tab** — browse and manage your prompt registry
+- Browse all prompts in a Unity Catalog schema with searchable dropdowns and version card lists
+- Create new prompts and register new versions directly from the UI — no Python required
+- Edit templates in-app; saving automatically creates a new version
+- Filter the prompt list to prompts that have runs in a specific MLflow experiment
+
+**Playground tab** — iterate interactively
+- Fill in `{{template_variables}}` and run against any model serving endpoint
+- Live rendered preview shows the filled prompt before you run
+- Every run is logged as an MLflow trace with a direct link to open in Databricks
+- Reset variables and run again without leaving the app
+
+**Evaluate tab** — batch evaluation against real data
+- Run a prompt version against any Unity Catalog Delta table dataset — no code required
+- Auto-map dataset columns to prompt variables by name, or configure the mapping manually
+- Dataset preview shows each row with the rendered prompt filled in before you run
+- Score with built-in LLM-as-judge presets or register your own judges (free-form instructions or structured guidelines checklists)
+- Post-run summary banner: avg score, copyable run ID, and a direct link to open results in MLflow
+- Results table with click-to-sort scores, per-row rendered prompt + full response + judge reasoning on expand
+- Low-scoring rows highlighted automatically for fast triage
+- "Open in Databricks" button links directly to the MLflow experiment run
 
 The React frontend is pre-built and included. **No Node.js required to deploy.**
 
@@ -224,7 +238,7 @@ mlflow.register_prompt(
 
 Then open the Prompt Playground app and select your prompt from the dropdown.
 
-> **Editing templates in-app:** Select a prompt and version, then click the **Edit** button in the Prompt Preview panel to modify the template. Saving creates a new version automatically.
+> **Editing templates in-app:** Select a prompt and version, then click the **New Version** button (top-right of the Prompt Preview panel, or next to the Version label in the left panel) to open the editor. Saving registers a new version automatically.
 
 ---
 
