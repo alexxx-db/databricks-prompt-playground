@@ -1,4 +1,4 @@
-import { FlaskConical, Play, BookOpen, Library } from 'lucide-react';
+import { FlaskConical, Play, BookOpen, Library, ExternalLink } from 'lucide-react';
 
 export type Tab = 'prompts' | 'playground' | 'evaluate' | 'howto';
 
@@ -12,11 +12,12 @@ const TABS: { id: Tab; label: string; icon: typeof Play }[] = [
 interface Props {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
+  experimentUrl?: string;
 }
 
-export default function TabBar({ activeTab, onTabChange }: Props) {
+export default function TabBar({ activeTab, onTabChange, experimentUrl }: Props) {
   return (
-    <div className="bg-white border-b border-gray-200 px-4 flex gap-1">
+    <div className="bg-white border-b border-gray-200 px-4 flex items-center gap-1">
       {TABS.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
@@ -31,6 +32,17 @@ export default function TabBar({ activeTab, onTabChange }: Props) {
           {label}
         </button>
       ))}
+      {experimentUrl && (
+        <a
+          href={experimentUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-databricks-red text-white text-xs font-medium rounded-md hover:bg-red-700 transition-colors whitespace-nowrap"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Open in Databricks
+        </a>
+      )}
     </div>
   );
 }

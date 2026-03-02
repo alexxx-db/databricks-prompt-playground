@@ -33,6 +33,7 @@ interface Props {
   template: PromptTemplate | null;
   experimentName: string;
   onNewVersion?: () => void;
+  onExperimentUrl?: (url: string) => void;
 }
 
 
@@ -84,7 +85,7 @@ export default function EvaluatePanel({
   evalCatalog, evalSchema,
   prompts, versions, selectedPrompt, selectedVersion,
   onSelectPrompt, onSelectVersion, models, selectedModel, onSelectModel,
-  template, experimentName, onNewVersion,
+  template, experimentName, onNewVersion, onExperimentUrl,
 }: Props) {
   const [localEvalCatalog, setLocalEvalCatalog] = useState(evalCatalog);
   const [localEvalSchema, setLocalEvalSchema] = useState(evalSchema);
@@ -105,6 +106,11 @@ export default function EvaluatePanel({
   const { columns } = useEvalColumns(localEvalCatalog, localEvalSchema, selectedTable);
   const { columns: previewCols, rows: previewRows, totalRows, loading: previewLoading } = useTablePreview(localEvalCatalog, localEvalSchema, selectedTable);
   const { result, loading, error, runEval, reset } = useRunEval();
+
+  // Bubble experiment URL up to App when eval completes
+  useEffect(() => {
+    if (result?.experiment_url) onExperimentUrl?.(result.experiment_url);
+  }, [result?.experiment_url]);
 
   // Auto-select latest version when versions load and none is selected
   useEffect(() => {

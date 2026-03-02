@@ -1,4 +1,4 @@
-import { Eye, Pencil, Save } from 'lucide-react';
+import { Eye, Pencil, Save, Plus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { parseTemplateVariables, parseSystemUser, buildXmlTemplate } from '../utils/templateUtils';
 
@@ -187,7 +187,11 @@ export default function PromptPreview({
           {(isEditing || isLatestVersion) && (
             <button
               onClick={onToggleEdit}
-              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+              className={`text-xs flex items-center gap-1 transition-colors ${
+              isEditing
+                ? 'text-gray-500 hover:text-gray-700'
+                : 'font-medium text-databricks-red hover:text-red-700'
+            }`}
             >
               {isEditing ? (
                 <>
@@ -195,7 +199,7 @@ export default function PromptPreview({
                 </>
               ) : (
                 <>
-                  <Pencil className="w-3 h-3" /> New Version
+                  <Plus className="w-3 h-3" /> New version
                 </>
               )}
             </button>
@@ -245,13 +249,12 @@ export default function PromptPreview({
           {inputMode === 'chat' ? (
             <div className="flex flex-col gap-3 flex-1 min-h-0">
               {/* System */}
-              <div className="flex flex-col" style={{ flex: '0 0 auto' }}>
+              <div className="flex flex-col flex-1 min-h-0">
                 <div className="text-[10px] font-semibold text-indigo-500 uppercase tracking-widest mb-1.5 px-1">
                   System <span className="font-normal text-gray-400 normal-case tracking-normal">(optional)</span>
                 </div>
                 <textarea
-                  className="text-sm font-mono bg-indigo-50/60 rounded-lg p-3 resize-none border border-indigo-100 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 focus:outline-none"
-                  rows={3}
+                  className="flex-1 min-h-0 w-full text-sm font-mono bg-indigo-50/60 rounded-lg p-3 resize-none border border-indigo-100 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 focus:outline-none"
                   value={localSystem}
                   onChange={(e) => handleSystemChange(e.target.value)}
                   placeholder="Define the model's persona or standing instructions. Use {{variable}} for variables."

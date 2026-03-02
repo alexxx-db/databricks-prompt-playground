@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { ChevronDown, ChevronUp, Star, Loader2, Table2, ArrowUp, ArrowDown, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronUp, Star, Loader2, Table2, ArrowUp, ArrowDown } from 'lucide-react';
 import type { EvalResponse, ScoreDetail, PromptTemplate } from '../../types';
 import { parseSystemUser } from '../../utils/templateUtils';
 
@@ -190,17 +190,6 @@ export default function DatasetTable({
             <span className="text-xs text-gray-400">({displayRows.length} rows shown)</span>
           )}
         </div>
-        {result && !loading && result.experiment_url && (
-          <a
-            href={result.experiment_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-databricks-red text-white text-xs font-medium rounded-lg hover:bg-red-700 transition-colors whitespace-nowrap"
-          >
-            <ExternalLink className="w-3 h-3" />
-            Open in Databricks
-          </a>
-        )}
       </div>
 
       {/* Post-run summary banner */}
@@ -323,11 +312,11 @@ export default function DatasetTable({
                   <Fragment key={i}>
                     <tr
                       className={`border-b border-gray-50 transition-colors ${
-                        showResults && rowResult ? 'cursor-pointer' : ''
+                        (showResults && rowResult) || canPreviewPrompt ? 'cursor-pointer' : ''
                       } ${
                         isExpanded ? 'bg-blue-50/30' : lowScore ? 'bg-red-50/50 hover:bg-red-50/70' : 'hover:bg-gray-50/70'
                       }`}
-                      onClick={showResults && rowResult ? () => setExpandedRow(isExpanded ? null : i) : undefined}
+                      onClick={(showResults && rowResult) || canPreviewPrompt ? () => setExpandedRow(isExpanded ? null : i) : undefined}
                     >
                       <td className="px-3 py-3 text-gray-400 font-mono text-[11px] select-none">{i + 1}</td>
 

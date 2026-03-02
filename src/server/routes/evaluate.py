@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from server.mlflow_client import get_prompt_template
 from server.templates import render_template, parse_system_user
-from server.mlflow_helpers import configure_mlflow, get_experiment_id, experiment_url, get_mlflow_client, EXPERIMENT_NAME
+from server.mlflow_helpers import configure_mlflow, get_experiment_id, experiment_url as make_experiment_url, get_mlflow_client, EXPERIMENT_NAME
 from server.llm import call_model
 from server.warehouse import list_eval_tables, get_table_columns, read_table_rows, count_table_rows
 from server.evaluation import mlflow_genai_evaluate
@@ -34,14 +34,14 @@ async def api_list_experiments(catalog: str | None = None, schema: str | None = 
 
         if not catalog or not schema:
             return {"experiments": [
-                {"name": e.name, "experiment_id": e.experiment_id} for e in active
+                {"name": e.name, "experiment_id": e.experiment_id, "url": make_experiment_url(e.experiment_id)} for e in active
             ]}
 
         # Sanitize: only allow word chars and hyphens in catalog/schema names
         import re
         if not re.match(r'^[\w\-]+$', catalog) or not re.match(r'^[\w\-]+$', schema):
             return {"experiments": [
-                {"name": e.name, "experiment_id": e.experiment_id} for e in active
+                {"name": e.name, "experiment_id": e.experiment_id, "url": make_experiment_url(e.experiment_id)} for e in active
             ]}
 
         all_ids = [e.experiment_id for e in active]
@@ -62,7 +62,7 @@ async def api_list_experiments(catalog: str | None = None, schema: str | None = 
 
         # Fall back to all experiments if nothing matched (e.g. fresh workspace)
         return {"experiments": [
-            {"name": e.name, "experiment_id": e.experiment_id}
+            {"name": e.name, "experiment_id": e.experiment_id, "url": make_experiment_url(e.experiment_id)}
             for e in (filtered if filtered else active)
         ]}
     except Exception as e:

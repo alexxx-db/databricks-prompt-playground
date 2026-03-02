@@ -92,6 +92,19 @@ export default function App() {
     ? prompts.filter((p) => experimentPromptNames.includes(p.name))
     : prompts;
   const { result, loading: runLoading, error: runError, run, reset } = useRunPrompt();
+  const [experimentUrl, setExperimentUrl] = useState<string | undefined>(undefined);
+
+  // Set experiment URL from the selected experiment (on load and on change)
+  useEffect(() => {
+    if (!experimentName) return;
+    const exp = experiments.find(e => e.name === experimentName);
+    if (exp?.url) setExperimentUrl(exp.url);
+  }, [experimentName, experiments]);
+
+  // Update experiment URL when playground run completes (fallback)
+  useEffect(() => {
+    if (result?.experiment_url) setExperimentUrl(result.experiment_url);
+  }, [result?.experiment_url]);
   const { save: saveVersion, loading: saveLoading, error: saveError } = useSaveVersion();
   const { create: createPrompt, loading: createLoading, error: createError } = useCreatePrompt();
 
@@ -219,7 +232,7 @@ export default function App() {
         onExperimentChange={handleExperimentChange}
       />
 
-      <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+      <TabBar activeTab={activeTab} onTabChange={handleTabChange} experimentUrl={experimentUrl} />
 
 
       <main className="flex-1 overflow-hidden">
@@ -242,6 +255,7 @@ export default function App() {
             template={template}
             experimentName={experimentName}
             onNewVersion={selectedVersion ? () => { editor.toggleEdit(); setActiveTab('prompts'); } : undefined}
+            onExperimentUrl={setExperimentUrl}
           />
         </div>
 
@@ -313,7 +327,7 @@ export default function App() {
             {/* Sticky footer — Test in Playground */}
             <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-white">
               <button
-                onClick={() => setActiveTab('playground')}
+                onClick={() => handleTabChange('playground')}
                 disabled={!selectedPrompt || !selectedVersion}
                 className="w-full py-2 px-4 rounded-md text-sm font-medium bg-databricks-red text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >

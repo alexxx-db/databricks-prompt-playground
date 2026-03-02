@@ -89,6 +89,7 @@ export interface SaveVersionResponse {
 export interface ExperimentInfo {
   name: string;
   experiment_id: string;
+  url?: string;
 }
 
 export interface JudgeInfo {
