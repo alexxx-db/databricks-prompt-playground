@@ -11,7 +11,7 @@ Prompt Playground is an interactive, no-code Databricks App for designing, testi
 
 ---
 
-## Prerequisites
+## Requirements
 
 Before deploying, make sure you have:
 
@@ -23,7 +23,7 @@ Before deploying, make sure you have:
 
 ---
 
-## Step-by-Step Deployment
+## Installation
 
 ### 1. Authenticate with your workspace
 
@@ -151,57 +151,12 @@ databricks bundle summary
 
 ---
 
-## Grant Service Principal Access
-
-After the first deploy, find your app's service principal client ID:
-
-1. Go to **Compute > Apps** in your workspace
-2. Click on **prompt-playground**
-3. Find the **Service principal** client ID in the app details
-
-Then run the following SQL in a notebook or SQL editor:
-
-```sql
--- Required for catalog access
-GRANT USE CATALOG ON CATALOG <your_catalog> TO `<sp-client-id>`;
-
--- Required for MLflow Prompt Registry (MANAGE is NOT included in ALL PRIVILEGES)
-GRANT USE SCHEMA, CREATE FUNCTION, EXECUTE, MANAGE
-  ON SCHEMA <your_catalog>.<prompt_schema>
-  TO `<sp-client-id>`;
-
--- Required for eval dataset queries
-GRANT USE SCHEMA, SELECT
-  ON SCHEMA <your_catalog>.<eval_schema>
-  TO `<sp-client-id>`;
-```
-
-> **Important:** The `MANAGE` privilege on the prompt schema is required for the MLflow Prompt Registry to function. It is **not** granted by `ALL PRIVILEGES` and must be granted explicitly.
-
----
-
-## Share the App with Users
-
-By default only workspace admins can access the app. To grant access to others:
-
-```bash
-databricks permissions update apps prompt-playground \
-  --json '[
-    {"user_name": "user@example.com", "permission_level": "CAN_USE"},
-    {"group_name": "data-team", "permission_level": "CAN_USE"}
-  ]'
-```
-
-Or grant access in the Databricks UI under **Compute > Apps > prompt-playground > Permissions**.
-
----
-
 ## Register Your First Prompt
 
 **Option A — from within the app (no code):**
 
 1. Open the Prompt Playground app
-2. In the **Playground** tab, click the **+** icon next to the Prompt selector
+2. Click the **+** icon next to the Prompt selector
 3. Fill in a name, optional description, and template (use `{{variable}}` placeholders)
 4. Click **Create Prompt** — the new prompt is registered and immediately selected
 
@@ -219,115 +174,9 @@ mlflow.register_prompt(
 )
 ```
 
-Then open the Prompt Playground app and select your prompt from the dropdown.
+Then open the app and select your prompt from the dropdown.
 
-> **Editing templates in-app:** Select a prompt and version, then click the **+ New version** button (top-right of the Prompt Preview panel) to open the editor. Saving registers a new version automatically.
-
----
-
-## Redeploy After Changes
-
-If you change `src/app.yaml` (catalog/schema) or `databricks.yml` (warehouse, endpoint):
-
-```bash
-databricks bundle deploy
-databricks bundle run prompt_playground
-```
-
-If you modify the Python source code:
-
-```bash
-databricks bundle deploy
-databricks bundle run prompt_playground
-```
-
-If you modify the React frontend source (`src/frontend/src/`):
-
-```bash
-cd src/frontend
-npm install
-npm run build
-cd ../..
-databricks bundle deploy
-databricks bundle run prompt_playground
-```
-
----
-
-## Destroy
-
-To remove the deployed app and all associated resources:
-
-```bash
-databricks bundle destroy
-```
-
----
-
-## Local Development
-
-### Run the server locally
-
-The app runs as a FastAPI server served from `src/`. The React frontend is pre-built — no Node.js needed to run locally.
-
-**1. Authenticate with Databricks:**
-
-```bash
-databricks auth login --host https://<your-workspace>.azuredatabricks.net
-```
-
-**2. Install dependencies:**
-
-```bash
-# With pip
-pip install -r src/requirements.txt
-
-# Or with uv
-uv pip install -r src/requirements.txt
-```
-
-**3. Set required environment variables:**
-
-```bash
-export PROMPT_CATALOG="your_catalog"
-export PROMPT_SCHEMA="prompts"
-export EVAL_SCHEMA="eval_data"
-export SQL_WAREHOUSE_ID="abc1234def567890"   # needed for eval; find in SQL > Warehouses > Connection details
-# Optional: scope model dropdown to a specific experiment
-export MLFLOW_EXPERIMENT_NAME="/Shared/prompt-playground-evaluation"
-```
-
-**4. Start the server from the `src/` directory:**
-
-```bash
-cd src
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Open [http://localhost:8000](http://localhost:8000) in your browser.
-
-> **Note:** `--reload` enables auto-restart on Python file changes. The frontend is served from the pre-built `src/frontend/dist/` — rebuild it (`cd src/frontend && npm run build`) to pick up frontend changes.
-
----
-
-### Run tests
-
-Run tests locally (requires Python 3.11+):
-
-**With pip:**
-```bash
-pip install fastapi uvicorn "mlflow[databricks]" databricks-sdk pydantic aiohttp httpx pytest requests
-pytest tests/ -v --ignore=tests/test_template_rendering.py
-```
-
-**With uv:**
-```bash
-uv run --no-project --python 3.11 \
-  --with "fastapi>=0.115.0,httpx>=0.27.0,pytest,mlflow[databricks]>=3.1.0,databricks-sdk>=0.30.0,pydantic>=2.0.0,aiohttp>=3.9.0,uvicorn,requests" \
-  pytest tests/ -v --ignore=tests/test_template_rendering.py
-```
-
-> **Note:** `tests/test_template_rendering.py` requires a live Databricks connection and is excluded from local runs.
+> **Editing templates in-app:** Select a prompt and version, then click the **+ New version** button to open the editor. Saving registers a new version automatically.
 
 ---
 
@@ -345,12 +194,14 @@ uv run --no-project --python 3.11 \
 **Model endpoint not listed**
 → The endpoint may not be in `READY` state. Check **Serving > Endpoints** in your workspace.
 
-**401 / auth errors during local dev**
-→ Re-authenticate: `databricks auth login --host <workspace-url>`
+---
+
+## How to get help
+
+For questions or issues, please open a GitHub issue and the team will respond on a best effort basis.
 
 ---
 
-## Support
+## License
 
-Databricks does not offer official support for Databricks Solutions and its repository.
-For any issue with this app, please open an issue on GitHub and the team will have a look on a best effort basis.
+This project is licensed under the [Databricks DB License](LICENSE.md).
