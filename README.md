@@ -57,6 +57,8 @@ The app URL will be printed in the output. You can also find it under **Compute 
 
 ## Usage
 
+> **First time? Start here:** Open the app and check out the **How to Use** tab for a full walkthrough. Click the **Settings** icon in the upper right to configure your SQL Warehouse, prompt catalog/schema, and evaluation dataset catalog/schema.
+
 **Register your first prompt from within the app (no code):**
 
 1. Open the Prompt Playground app
@@ -88,10 +90,10 @@ Then open the app and select your prompt from the dropdown.
 → The service principal is missing `MANAGE` on the prompts schema.
 
 **"No prompts found"**
-→ Check that `PROMPT_CATALOG` and `PROMPT_SCHEMA` in `src/app.yaml` match where your prompts are registered, and that the service principal has access.
+→ Open Settings (upper right) and verify your prompt catalog and schema are correct. Confirm the app's service principal has access to that schema.
 
 **Eval datasets not loading**
-→ Verify `EVAL_SCHEMA` in `src/app.yaml` and that the service principal has `SELECT` on that schema.
+→ Open Settings and verify your evaluation dataset catalog and schema. Confirm the service principal has `SELECT` on that schema.
 
 **Model endpoint not listed**
 → The endpoint may not be in `READY` state. Check **Serving > Endpoints** in your workspace.
