@@ -11,10 +11,10 @@ Prompt Playground is an interactive, no-code Databricks App for designing, testi
 
 ### Prerequisites
 
-- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) `>= 0.220.0`
-- A **Unity Catalog catalog** with your MLflow Prompt Registry prompts (and optionally evaluation datasets)
-- A **SQL Warehouse** running in your workspace (needed for eval dataset queries)
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) `>= 0.220.0`, authenticated via `databricks auth login`
+- A **SQL Warehouse** running in your workspace
 - A **model serving endpoint** — [Foundation Model API](https://docs.databricks.com/machine-learning/foundation-models/index.html) endpoints work out of the box
+- The app's **service principal** must have `MANAGE` on the Unity Catalog schema where your prompts are stored, and `MANAGE` on the schema where eval results will be written
 
 ### Setup
 
@@ -25,27 +25,7 @@ git clone https://github.com/databricks-solutions/prompt-playground.git
 cd prompt-playground
 ```
 
-**2. Configure your SQL Warehouse**
-
-Open `databricks.yml` and set your warehouse by name (recommended):
-
-```yaml
-variables:
-  warehouse_id:
-    description: "SQL Warehouse for eval queries"
-    lookup:
-      warehouse: "Serverless Starter Warehouse"   # replace with your warehouse name
-```
-
-Or set the warehouse ID directly:
-
-```yaml
-variables:
-  warehouse_id:
-    default: "abc1234def567890"   # find this in SQL > Warehouses > <name> > Connection details
-```
-
-**3. Deploy**
+**2. Deploy**
 
 ```bash
 databricks bundle validate
@@ -59,30 +39,12 @@ The app URL will be printed in the output. You can also find it under **Compute 
 
 > **First time? Start here:** Open the app and check out the **How to Use** tab for a full walkthrough. Click the **Settings** icon in the upper right to configure your SQL Warehouse, prompt catalog/schema, and evaluation dataset catalog/schema.
 
-**Register your first prompt from within the app (no code):**
+**Register your first prompt from within the app:**
 
 1. Open the Prompt Playground app
 2. Click the **+** icon next to the Prompt selector
 3. Fill in a name, optional description, and template (use `{{variable}}` placeholders)
 4. Click **Create Prompt** — the new prompt is registered and immediately selected
-
-**Or register from a notebook:**
-
-```python
-import mlflow
-
-mlflow.set_registry_uri("databricks-uc")
-
-mlflow.register_prompt(
-    name="your_catalog.prompts.my_prompt",
-    template="You are a helpful assistant. Answer: {{question}}",
-    commit_message="Initial version",
-)
-```
-
-Then open the app and select your prompt from the dropdown.
-
-> **Editing templates in-app:** Select a prompt and version, then click **+ New version** to open the editor. Saving registers a new version automatically.
 
 ## Troubleshooting
 
@@ -93,7 +55,7 @@ Then open the app and select your prompt from the dropdown.
 → Open Settings (upper right) and verify your prompt catalog and schema are correct. Confirm the app's service principal has access to that schema.
 
 **Eval datasets not loading**
-→ Open Settings and verify your evaluation dataset catalog and schema. Confirm the service principal has `SELECT` on that schema.
+→ Open Settings and verify your evaluation dataset catalog and schema. Confirm the service principal has `MANAGE` on that schema.
 
 **Model endpoint not listed**
 → The endpoint may not be in `READY` state. Check **Serving > Endpoints** in your workspace.
