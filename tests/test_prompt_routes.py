@@ -1,7 +1,10 @@
-"""Tests for prompt creation and versioning API routes.
+"""Tests for prompt API routes.
 
 Covers:
-- POST /api/prompts  — create a new prompt
+- GET  /api/prompts           — list prompts in catalog.schema
+- GET  /api/prompts/versions  — get versions for a prompt
+- GET  /api/prompts/template  — load a prompt template by name+version
+- POST /api/prompts           — create a new prompt
 - POST /api/prompts/versions  — save a new version of an existing prompt
 """
 
@@ -163,3 +166,133 @@ def test_save_version_other_error_returns_500(client):
         })
 
     assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /api/prompts — list prompts
+# ---------------------------------------------------------------------------
+
+def test_list_prompts_success(client):
+    with patch("server.routes.prompts.list_prompts") as mock_list:
+        mock_list.return_value = [
+            {"name": "main.prompts.prompt_a"},
+            {"name": "main.prompts.prompt_b"},
+        ]
+        response = client.get("/api/prompts?catalog=main&schema=prompts")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["prompts"]) == 2
+    assert data["catalog"] == "main"
+    assert data["schema"] == "prompts"
+
+
+def test_list_prompts_uses_default_catalog_schema(client):
+    with patch("server.routes.prompts.list_prompts") as mock_list:
+        mock_list.return_value = []
+        response = client.get("/api/prompts")
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(catalog="main", schema="prompts")
+
+
+def test_list_prompts_custom_catalog_schema(client):
+    with patch("server.routes.prompts.list_prompts") as mock_list:
+        mock_list.return_value = []
+        client.get("/api/prompts?catalog=my_cat&schema=my_schema")
+
+    mock_list.assert_called_once_with(catalog="my_cat", schema="my_schema")
+
+
+def test_list_prompts_permission_error_returns_403(client):
+    with patch("server.routes.prompts.list_prompts") as mock_list:
+        mock_list.side_effect = Exception("PERMISSION_DENIED: does not have USE SCHEMA privilege")
+        response = client.get("/api/prompts?catalog=main&schema=prompts")
+
+    assert response.status_code == 403
+    assert "Permission denied" in response.json()["detail"]
+
+
+def test_list_prompts_other_error_returns_500(client):
+    with patch("server.routes.prompts.list_prompts") as mock_list:
+        mock_list.side_effect = Exception("MLflow connection failed")
+        response = client.get("/api/prompts?catalog=main&schema=prompts")
+
+    assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /api/prompts/versions — get versions for a prompt
+# ---------------------------------------------------------------------------
+
+def test_get_versions_success(client):
+    with patch("server.routes.prompts.get_prompt_versions") as mock_ver:
+        mock_ver.return_value = [
+            {"version": "1", "template": "v1 template"},
+            {"version": "2", "template": "v2 template"},
+        ]
+        response = client.get("/api/prompts/versions?name=main.prompts.my_prompt")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "main.prompts.my_prompt"
+    assert len(data["versions"]) == 2
+
+
+def test_get_versions_requires_name_param(client):
+    response = client.get("/api/prompts/versions")
+    assert response.status_code == 422
+
+
+def test_get_versions_error_returns_500(client):
+    with patch("server.routes.prompts.get_prompt_versions") as mock_ver:
+        mock_ver.side_effect = Exception("MLflow error")
+        response = client.get("/api/prompts/versions?name=main.prompts.bad_prompt")
+
+    assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /api/prompts/template — load a template by name+version
+# ---------------------------------------------------------------------------
+
+def test_get_template_success(client):
+    with patch("server.routes.prompts.get_prompt_template") as mock_tpl:
+        mock_tpl.return_value = {
+            "template": "Answer: {{question}}",
+            "variables": ["question"],
+            "system_prompt": None,
+        }
+        response = client.get("/api/prompts/template?name=main.prompts.my_prompt&version=1")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["template"] == "Answer: {{question}}"
+    assert data["variables"] == ["question"]
+
+
+def test_get_template_not_found_returns_404(client):
+    with patch("server.routes.prompts.get_prompt_template") as mock_tpl:
+        mock_tpl.side_effect = ValueError("Prompt version not found")
+        response = client.get("/api/prompts/template?name=main.prompts.gone&version=99")
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_template_other_error_returns_500(client):
+    with patch("server.routes.prompts.get_prompt_template") as mock_tpl:
+        mock_tpl.side_effect = Exception("MLflow internal error")
+        response = client.get("/api/prompts/template?name=main.prompts.my_prompt&version=1")
+
+    assert response.status_code == 500
+
+
+def test_get_template_requires_name_and_version(client):
+    # Missing version
+    response = client.get("/api/prompts/template?name=main.prompts.my_prompt")
+    assert response.status_code == 422
+
+    # Missing name
+    response = client.get("/api/prompts/template?version=1")
+    assert response.status_code == 422

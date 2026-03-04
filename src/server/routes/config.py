@@ -55,7 +55,7 @@ class ConfigUpdate(BaseModel):
 
 
 @router.post("")
-async def update_config(body: ConfigUpdate):
+async def update_config(body: ConfigUpdate, background_tasks: BackgroundTasks):
     """Persist user-configured settings to disk."""
     save_settings(body.model_dump(exclude_none=True))
-    return await get_config()
+    return await get_config(background_tasks)
