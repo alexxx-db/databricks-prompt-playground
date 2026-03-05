@@ -1,6 +1,7 @@
 """API routes for running prompts against models."""
 
 import re
+import json
 import logging
 import mlflow
 from fastapi import APIRouter, HTTPException
@@ -146,6 +147,22 @@ async def api_run_prompt(request: RunRequest):
                     span.set_status("ERROR")
                     raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
                 span.set_outputs({"response": result["content"], "usage": result.get("usage", {})})
+
+                # Set the mlflow.linkedPrompts trace tag so the prompt version
+                # appears in the "Linked prompts" tab in the Databricks Traces UI.
+                # The REST API (LinkPromptVersionsToTraces) does not populate this tag,
+                # so we must set it manually. See: https://databricks.slack.com/archives/C083A8HQC6N/p1765414094281199
+                if request.draft_template is None:
+                    try:
+                        prompt_link = json.dumps([{
+                            "name": request.prompt_name,
+                            "version": request.prompt_version,
+                        }])
+                        get_mlflow_client().set_trace_tag(
+                            span.request_id, "mlflow.linkedPrompts", prompt_link
+                        )
+                    except Exception as e:
+                        logger.warning("set_trace_tag mlflow.linkedPrompts failed (non-fatal): %s", e)
 
             _log_run_artifacts(run.info.run_id, rendered, rendered_system, result, request)
 

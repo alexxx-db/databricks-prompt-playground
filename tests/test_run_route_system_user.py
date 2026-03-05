@@ -45,6 +45,7 @@ def _mock_mlflow(mock_mlflow):
     mock_span = MagicMock()
     mock_span.__enter__ = MagicMock(return_value=mock_span)
     mock_span.__exit__ = MagicMock(return_value=False)
+    mock_span.request_id = "test-trace-id"
     mock_mlflow.start_span.return_value = mock_span
 
     for attr in ("log_text", "log_metrics", "log_params", "log_param", "set_tags"):
@@ -434,3 +435,84 @@ class TestGuardrails:
         data = response.json()
         assert "system_prompt" in data
         assert data["system_prompt"] is None
+
+
+# ---------------------------------------------------------------------------
+# mlflow.linkedPrompts trace tag
+# ---------------------------------------------------------------------------
+
+class TestLinkedPromptsTag:
+    """Verify the mlflow.linkedPrompts trace tag is set correctly.
+
+    The REST API LinkPromptVersionsToTraces does not populate the trace tag
+    read by the Databricks UI, so we set it manually via set_trace_tag.
+    See: https://databricks.slack.com/archives/C083A8HQC6N/p1765414094281199
+    """
+
+    def _run_registry(self, client, mock_client=None):
+        mock_template = {
+            "template": "Hello {{name}}.",
+            "system_prompt": None,
+            "variables": ["name"],
+            "raw_template": "Hello {{name}}.",
+        }
+        if mock_client is None:
+            mock_client = MagicMock()
+        payload = {
+            "prompt_name": "main.prompts.test",
+            "prompt_version": "1",
+            "model_name": "databricks-test-model",
+            "variables": {"name": "Alice"},
+        }
+        with (
+            patch("server.routes.run.get_prompt_template", return_value=mock_template),
+            patch("server.routes.run.configure_mlflow"),
+            patch("server.routes.run.get_experiment_id", return_value=None),
+            patch("server.routes.run.call_model", new=AsyncMock(return_value=_model_result())),
+            patch("server.routes.run.get_mlflow_client", return_value=mock_client),
+            patch("server.routes.run.mlflow") as mock_mlflow,
+        ):
+            _mock_mlflow(mock_mlflow)
+            resp = client.post("/api/run", json=payload)
+        return resp, mock_client
+
+    def test_registry_prompt_sets_linked_prompts_tag(self, client):
+        """set_trace_tag is called with mlflow.linkedPrompts and correct JSON for registry prompts."""
+        import json
+        mock_client = MagicMock()
+        resp, _ = self._run_registry(client, mock_client)
+        assert resp.status_code == 200
+
+        mock_client.set_trace_tag.assert_called_once_with(
+            "test-trace-id",
+            "mlflow.linkedPrompts",
+            json.dumps([{"name": "main.prompts.test", "version": "1"}]),
+        )
+
+    def test_draft_prompt_does_not_set_linked_prompts_tag(self, client):
+        """Draft templates skip the trace tag — no prompt version to link."""
+        mock_client = MagicMock()
+        with (
+            patch("server.routes.run.configure_mlflow"),
+            patch("server.routes.run.get_experiment_id", return_value=None),
+            patch("server.routes.run.call_model", new=AsyncMock(return_value=_model_result())),
+            patch("server.routes.run.get_mlflow_client", return_value=mock_client),
+            patch("server.routes.run.mlflow") as mock_mlflow,
+        ):
+            _mock_mlflow(mock_mlflow)
+            resp = client.post("/api/run", json={
+                "prompt_name": "main.prompts.test",
+                "prompt_version": "1",
+                "model_name": "databricks-test-model",
+                "draft_template": "A draft prompt.",
+            })
+        assert resp.status_code == 200
+        mock_client.set_trace_tag.assert_not_called()
+
+    def test_set_trace_tag_failure_is_non_fatal(self, client):
+        """If set_trace_tag raises, the run still succeeds and returns 200."""
+        mock_client = MagicMock()
+        mock_client.set_trace_tag.side_effect = Exception("trace tag error")
+        resp, _ = self._run_registry(client, mock_client)
+        assert resp.status_code == 200
+        assert resp.json()["response"] == "Model response."
