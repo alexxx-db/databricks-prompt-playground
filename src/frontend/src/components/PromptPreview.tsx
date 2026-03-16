@@ -18,6 +18,9 @@ interface Props {
   saveLoading: boolean;
   saveError: string | null;
   isDirty: boolean;
+  onCompare?: () => void;
+  canCompare?: boolean;
+  nextVersion?: string;
 }
 
 function highlightVars(tpl: string, values: Record<string, string>): string {
@@ -43,6 +46,9 @@ export default function PromptPreview({
   saveLoading,
   saveError,
   isDirty,
+  onCompare,
+  canCompare,
+  nextVersion,
 }: Props) {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveDescription, setSaveDescription] = useState('');
@@ -147,14 +153,33 @@ export default function PromptPreview({
     <div className="card h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
-        {isEditing ? (
-          <Pencil className="w-4 h-4 text-databricks-red" />
-        ) : (
-          <Eye className="w-4 h-4 text-gray-500" />
+        {!isEditing && canCompare && (
+          <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
+            <button
+              className="px-3 py-1.5 font-medium bg-gray-100 text-gray-800 cursor-default"
+            >
+              Preview
+            </button>
+            <button
+              onClick={onCompare}
+              className="px-3 py-1.5 font-medium transition-colors border-l border-gray-200 text-gray-500 hover:text-gray-700"
+            >
+              Compare
+            </button>
+          </div>
         )}
-        <h3 className="text-sm font-semibold text-gray-700">
-          {isEditing ? 'New Version' : 'Prompt Preview'}
-        </h3>
+        {!(canCompare && !isEditing) && (
+          isEditing ? (
+            <Pencil className="w-4 h-4 text-databricks-red" />
+          ) : (
+            <Eye className="w-4 h-4 text-gray-500" />
+          )
+        )}
+        {!(canCompare && !isEditing) && (
+          <h3 className="text-sm font-semibold text-gray-700">
+            {isEditing ? `New Version${nextVersion ? ` (v${nextVersion})` : ''}` : 'Prompt Preview'}
+          </h3>
+        )}
         {isDirty && (
           <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
             Draft

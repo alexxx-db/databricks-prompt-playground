@@ -49,4 +49,4 @@ def get_experiment_id(experiment_name: str | None = None) -> str | None:
 
 def experiment_url(experiment_id: str) -> str:
     """Build a workspace URL for an MLflow experiment."""
-    return f"{get_workspace_host().rstrip('/')}/ml/experiments/{experiment_id}"
+    return f"{get_workspace_host().rstrip('/')}/ml/experiments/{experiment_id}?searchFilter="

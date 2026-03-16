@@ -231,71 +231,83 @@ class TestListExperimentsWithFilter:
 
 class TestGetExperimentPrompts:
 
-    def test_returns_sorted_prompt_names(self, client):
+    def test_returns_sorted_prompt_names_from_tags(self, client):
+        """Primary path: filter prompts by _mlflow_experiment_ids tag."""
         experiment = MagicMock()
         experiment.experiment_id = "exp-1"
 
-        runs = [
-            _make_run("exp-1", "main.prompts.z_prompt"),
-            _make_run("exp-1", "main.prompts.a_prompt"),
-            _make_run("exp-1", "main.prompts.m_prompt"),
+        prompts = [
+            {"name": "main.prompts.z_prompt", "tags": {"_mlflow_experiment_ids": ",exp-1,"}},
+            {"name": "main.prompts.a_prompt", "tags": {"_mlflow_experiment_ids": ",exp-1,"}},
+            {"name": "main.prompts.m_prompt", "tags": {"_mlflow_experiment_ids": ",exp-1,"}},
         ]
         mock_client = MagicMock()
         mock_client.get_experiment_by_name.return_value = experiment
-        mock_client.search_runs.return_value = runs
 
-        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client):
-            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp")
+        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client), \
+             patch("server.routes.evaluate.list_prompts", return_value=prompts), \
+             patch("server.routes.evaluate.configure_mlflow"):
+            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp&catalog=main&schema=prompts")
 
         assert resp.status_code == 200
         names = resp.json()["prompt_names"]
         assert names == sorted(names)
         assert len(names) == 3
 
-    def test_deduplicates_prompt_names(self, client):
+    def test_filters_by_experiment_id(self, client):
+        """Only prompts tagged with the correct experiment ID are returned."""
         experiment = MagicMock()
         experiment.experiment_id = "exp-1"
 
-        runs = [
-            _make_run("exp-1", "main.prompts.my_prompt"),
-            _make_run("exp-1", "main.prompts.my_prompt"),  # duplicate
-            _make_run("exp-1", "main.prompts.other_prompt"),
+        prompts = [
+            {"name": "main.prompts.my_prompt", "tags": {"_mlflow_experiment_ids": ",exp-1,"}},
+            {"name": "main.prompts.other_exp", "tags": {"_mlflow_experiment_ids": ",exp-999,"}},
+            {"name": "main.prompts.no_tag", "tags": {}},
         ]
         mock_client = MagicMock()
         mock_client.get_experiment_by_name.return_value = experiment
-        mock_client.search_runs.return_value = runs
 
-        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client):
-            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp")
+        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client), \
+             patch("server.routes.evaluate.list_prompts", return_value=prompts), \
+             patch("server.routes.evaluate.configure_mlflow"):
+            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp&catalog=main&schema=prompts")
 
         names = resp.json()["prompt_names"]
-        assert len(names) == 2
-        assert names.count("main.prompts.my_prompt") == 1
+        assert len(names) == 1
+        assert names == ["main.prompts.my_prompt"]
 
     def test_returns_empty_when_experiment_not_found(self, client):
         mock_client = MagicMock()
         mock_client.get_experiment_by_name.return_value = None
 
-        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client):
+        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client), \
+             patch("server.routes.evaluate.configure_mlflow"):
             resp = client.get("/api/eval/experiments/prompts?experiment_name=nonexistent")
 
         assert resp.status_code == 200
         assert resp.json()["prompt_names"] == []
 
-    def test_skips_runs_without_prompt_name_tag(self, client):
+    def test_falls_back_to_runs_when_no_tags(self, client):
+        """When no prompts have experiment tags, fall back to searching runs."""
         experiment = MagicMock()
         experiment.experiment_id = "exp-1"
 
+        # No prompts have the experiment tag
+        prompts = [
+            {"name": "main.prompts.has_tag", "tags": {}},
+        ]
         runs = [
             _make_run("exp-1", "main.prompts.has_tag"),
-            _make_run("exp-1", None),  # no prompt_name tag
+            _make_run("exp-1", None),  # no prompt_name tag — should be skipped
         ]
         mock_client = MagicMock()
         mock_client.get_experiment_by_name.return_value = experiment
         mock_client.search_runs.return_value = runs
 
-        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client):
-            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp")
+        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client), \
+             patch("server.routes.evaluate.list_prompts", return_value=prompts), \
+             patch("server.routes.evaluate.configure_mlflow"):
+            resp = client.get("/api/eval/experiments/prompts?experiment_name=my_exp&catalog=main&schema=prompts")
 
         assert resp.json()["prompt_names"] == ["main.prompts.has_tag"]
 
@@ -307,7 +319,8 @@ class TestGetExperimentPrompts:
         mock_client = MagicMock()
         mock_client.get_experiment_by_name.side_effect = RuntimeError("MLflow error")
 
-        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client):
+        with patch("server.routes.evaluate.get_mlflow_client", return_value=mock_client), \
+             patch("server.routes.evaluate.configure_mlflow"):
             resp = client.get("/api/eval/experiments/prompts?experiment_name=exp")
 
         assert resp.status_code == 500

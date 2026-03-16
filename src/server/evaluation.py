@@ -150,6 +150,19 @@ def _link_prompt_version(run_id: str, prompt_name: str, prompt_version: str) -> 
         logger.warning("link_prompt_version_to_run failed (non-fatal): %s", e)
 
 
+_PASS_STRINGS = frozenset({
+    "true", "yes", "pass", "1",
+    # MLflow builtin scorer return values
+    "fluent", "safe", "relevant", "complete", "correct",
+})
+_FAIL_STRINGS = frozenset({
+    "false", "no", "fail", "0",
+    # MLflow builtin scorer return values
+    "not fluent", "not safe", "unsafe", "not relevant", "irrelevant",
+    "not complete", "incomplete", "not correct", "incorrect",
+})
+
+
 def _is_pass(val: object) -> bool:
     """Determine if an assessment value represents a pass/true."""
     if isinstance(val, bool):
@@ -157,8 +170,15 @@ def _is_pass(val: object) -> bool:
     if isinstance(val, (int, float)):
         return val >= 1
     if isinstance(val, str):
-        return val.lower() in ("true", "yes", "pass", "1")
+        return val.lower() in _PASS_STRINGS
     return False
+
+
+def _normalize_pass_fail(val: float | str | None) -> float | str | None:
+    """Convert known pass/fail string values to 1.0/0.0 for binary scorers."""
+    if isinstance(val, str) and val.lower() in _PASS_STRINGS | _FAIL_STRINGS:
+        return 1.0 if val.lower() in _PASS_STRINGS else 0.0
+    return val
 
 
 def _extract_scores_from_result(eval_result: object, expected_name: str) -> dict[int, RowScore]:
@@ -259,6 +279,7 @@ def _extract_scores_from_result(eval_result: object, expected_name: str) -> dict
                 score: float | str | None = float(raw_value) if raw_value is not None else None
             except (TypeError, ValueError):
                 score = _safe_str(raw_value)
+            score = _normalize_pass_fail(score)
 
             row_scores[int(row_idx)] = (score, _safe_str(raw_rationale), None)
 
@@ -339,6 +360,7 @@ def _extract_row_scores(run_id: str, expected_name: str) -> dict[int, RowScore]:
                     score_val: float | str | None = float(raw_value) if raw_value is not None else None
                 except (TypeError, ValueError):
                     score_val = _safe_str(raw_value)
+                score_val = _normalize_pass_fail(score_val)
 
                 raw.setdefault(int(row_idx), []).append({
                     "name": aname,

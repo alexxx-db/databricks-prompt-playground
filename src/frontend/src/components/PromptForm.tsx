@@ -8,11 +8,12 @@ type InputMode = 'chat' | 'raw';
 interface Props {
   catalog: string;
   schema: string;
+  experimentName?: string;
   onSaved: (name: string, version: string) => void;
   onCancel: () => void;
 }
 
-export default function PromptForm({ catalog, schema, onSaved, onCancel }: Props) {
+export default function PromptForm({ catalog, schema, experimentName, onSaved, onCancel }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [inputMode, setInputMode] = useState<InputMode>('chat');
@@ -56,6 +57,7 @@ export default function PromptForm({ catalog, schema, onSaved, onCancel }: Props
         name: `${catalog}.${schema}.${name.trim()}`,
         template: getTemplate(),
         description: description.trim(),
+        experiment_name: experimentName || undefined,
       });
       onSaved(result.name, result.version);
     } catch {

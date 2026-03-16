@@ -3,10 +3,11 @@ import { FlaskConical, Loader2, ChevronDown, ChevronUp, Plus, Pencil, Trash2, Ey
 import SearchableSelect from './SearchableSelect';
 import TemplatePreview from './TemplatePreview';
 import type { PromptInfo, PromptVersion, PromptTemplate } from '../types';
-import { useEvalTables, useEvalColumns, useTablePreview, useRunEval, useJudges, useDeleteJudge, useJudgeDetail } from '../hooks/useEvalApi';
+import { useEvalTables, useEvalColumns, useTablePreview, useRunEval, useJudges, useDeleteJudge, useJudgeDetail, useEvalHistory } from '../hooks/useEvalApi';
 import { parseTemplateVariables } from '../utils/templateUtils';
 import JudgeForm from './eval/JudgeForm';
 import DatasetTable from './eval/DatasetTable';
+import EvalRunHistory from './eval/EvalRunHistory';
 import ConfirmDialog from './ConfirmDialog';
 
 const BUILTIN_JUDGES = [
@@ -114,11 +115,17 @@ export default function EvaluatePanel({
   const { columns } = useEvalColumns(evalCatalog, evalSchema, selectedTable);
   const { columns: previewCols, rows: previewRows, totalRows, loading: previewLoading } = useTablePreview(evalCatalog, evalSchema, selectedTable);
   const { result, loading, error, runEval, abort, reset } = useRunEval();
+  const { runs: historyRuns, loading: historyLoading, refresh: refreshHistory } = useEvalHistory(selectedPrompt, experimentName);
 
   // Bubble experiment URL up to App when eval completes
   useEffect(() => {
     if (result?.experiment_url) onExperimentUrl?.(result.experiment_url);
   }, [result?.experiment_url]);
+
+  // Refresh history after each eval run completes
+  useEffect(() => {
+    if (result?.run_id) refreshHistory();
+  }, [result?.run_id]);
 
   // Auto-select the latest version when versions load and none is selected.
   // Versions are cleared synchronously on prompt change (via resetVersions in App.tsx),
@@ -224,6 +231,16 @@ export default function EvaluatePanel({
             options={prompts.map((p) => ({ value: p.name, label: p.name.split('.').pop() ?? p.name }))}
           />
         </div>
+
+        {/* Eval history — prompt level, all versions */}
+        {selectedPrompt && (
+          <EvalRunHistory
+            promptName={selectedPrompt}
+            promptVersion={selectedVersion}
+            runs={historyRuns}
+            loading={historyLoading}
+          />
+        )}
 
         {/* Version picker */}
         {selectedPrompt && (

@@ -7,6 +7,33 @@ from server.config import get_workspace_host, get_oauth_token, get_workspace_cli
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Eval-abort error hierarchy — raised by call_model when the error means
+# we should stop the eval run immediately (not retry per-row).
+# ---------------------------------------------------------------------------
+
+class EvalAbortError(Exception):
+    """Base for errors that should abort an eval run immediately."""
+
+
+class TokenLimitError(EvalAbortError):
+    """Prompt exceeds the model's context window."""
+
+
+class RateLimitError(EvalAbortError):
+    """Workspace or endpoint rate limit hit."""
+
+
+# Keywords that indicate a context-length / token-limit error
+_TOKEN_LIMIT_KEYWORDS = [
+    "context_length_exceeded",
+    "context window",
+    "max tokens",
+    "maximum context length",
+    "token limit",
+]
+
+
 CHAT_TASKS = {
     "llm/v1/chat",
     "llm/v1/completions",
@@ -114,6 +141,22 @@ async def call_model(
         async with session.post(url, json=payload, headers=headers) as response:
             if response.status != 200:
                 error_text = await response.text()
+                error_lower = error_text.lower()
+
+                # Rate limit: HTTP 429 or REQUEST_LIMIT_EXCEEDED in body
+                if response.status == 429 or "request_limit_exceeded" in error_lower:
+                    raise RateLimitError(
+                        f"Rate limit exceeded for endpoint '{endpoint_name}'. "
+                        "Try again in a few minutes or reduce concurrency."
+                    )
+
+                # Token / context-length limit
+                if any(kw in error_lower for kw in _TOKEN_LIMIT_KEYWORDS):
+                    raise TokenLimitError(
+                        f"Prompt exceeds the model's context window. "
+                        "Try reducing the prompt length or the number of variables."
+                    )
+
                 # Detect temperature-unsupported errors from external model proxies (e.g. Azure OpenAI)
                 if response.status == 400 and "temperature" in error_text:
                     import re, json as _json

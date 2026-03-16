@@ -8,6 +8,7 @@ import VariableInputs from './components/VariableInputs';
 import ModelSelector from './components/ModelSelector';
 import RunControls from './components/RunControls';
 import PromptPreview from './components/PromptPreview';
+import PromptDiffView from './components/PromptDiffView';
 import ResponsePanel from './components/ResponsePanel';
 import EvaluatePanel from './components/EvaluatePanel';
 import HowToTab from './components/HowToTab';
@@ -35,6 +36,7 @@ export default function App() {
   const [pendingVersionChange, setPendingVersionChange] = useState<{ version: string | null } | null>(null);
   const [showCreatePrompt, setShowCreatePrompt] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
 
   // Load catalog/schema config from backend (set via app.yaml env vars)
   const { config, loading: configLoading, refresh: refreshConfig, isConfigured } = useConfig();
@@ -98,14 +100,12 @@ export default function App() {
     refresh: refreshModels,
   } = useModels();
   const { experiments, loading: experimentsLoading } = useExperiments();
-  const { promptNames: experimentPromptNames, loading: experimentPromptsLoading, refresh: refreshExperimentPrompts } = useExperimentPrompts(experimentName);
+  const { promptNames: experimentPromptNames, loading: experimentPromptsLoading, refresh: refreshExperimentPrompts } = useExperimentPrompts(experimentName, activeCatalog, activeSchema);
   const filteredPrompts = (filterByExperiment && experimentPromptNames)
-    ? prompts.filter((p) => experimentPromptNames.includes(p.name))
+    ? prompts.filter((p) => experimentPromptNames.includes(p.name) || p.name === selectedPrompt)
     : prompts;
   // Don't show the selected prompt in the browser if it's been filtered out by the experiment toggle
-  const promptsTabSelectedPrompt = (filterByExperiment && selectedPrompt && experimentPromptNames)
-    ? (filteredPrompts.some((p) => p.name === selectedPrompt) ? selectedPrompt : null)
-    : selectedPrompt;
+  const promptsTabSelectedPrompt = selectedPrompt;
   const { result, loading: runLoading, error: runError, run, reset } = useRunPrompt();
   const [experimentUrl, setExperimentUrl] = useState<string | undefined>(undefined);
 
@@ -156,6 +156,7 @@ export default function App() {
     setSelectedPrompt(name);
     setSelectedVersion(null);
     setVariableValues({});
+    setShowDiff(false);
     editor.exitEdit();
   }, [editor.isDirty, editor.exitEdit, resetVersions]);
 
@@ -342,24 +343,36 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Panel - Full-height PromptPreview */}
+          {/* Right Panel - PromptPreview or PromptDiffView */}
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-hidden">
-              <PromptPreview
-                template={editor.activeTemplate}
-                variables={editor.activeVariables}
-                values={variableValues}
-                isEditing={editor.isEditing}
-                isLatestVersion={!versions.length || !selectedVersion || selectedVersion === versions[0]?.version}
-                onToggleEdit={editor.toggleEdit}
-                draftTemplate={editor.draftTemplate}
-                onDraftChange={editor.setDraftTemplate}
-                onDraftVariablesChange={editor.setDraftVariables}
-                onSave={editor.save}
-                saveLoading={saveLoading || createLoading}
-                saveError={saveError || createError}
-                isDirty={editor.isDirty}
-              />
+              {showDiff && selectedPrompt ? (
+                <PromptDiffView
+                  promptName={selectedPrompt}
+                  versions={versions}
+                  currentVersion={selectedVersion}
+                  onClose={() => setShowDiff(false)}
+                />
+              ) : (
+                <PromptPreview
+                  template={editor.activeTemplate}
+                  variables={editor.activeVariables}
+                  values={variableValues}
+                  isEditing={editor.isEditing}
+                  isLatestVersion={!versions.length || !selectedVersion || selectedVersion === versions[0]?.version}
+                  onToggleEdit={editor.toggleEdit}
+                  draftTemplate={editor.draftTemplate}
+                  onDraftChange={editor.setDraftTemplate}
+                  onDraftVariablesChange={editor.setDraftVariables}
+                  onSave={editor.save}
+                  saveLoading={saveLoading || createLoading}
+                  saveError={saveError || createError}
+                  isDirty={editor.isDirty}
+                  onCompare={() => setShowDiff(true)}
+                  canCompare={versions.length > 1}
+                  nextVersion={versions.length > 0 ? String(Number(versions[0].version) + 1) : '1'}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -527,9 +540,11 @@ export default function App() {
         <PromptForm
           catalog={activeCatalog}
           schema={activeSchema}
+          experimentName={experimentName}
           onSaved={async (name, version) => {
             setShowCreatePrompt(false);
             await refreshPrompts();
+            await refreshExperimentPrompts();
             setSelectedPrompt(name);
             setSelectedVersion(version);
             setVariableValues({});

@@ -5,12 +5,12 @@ import asyncio
 import mlflow
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from server.mlflow_client import get_prompt_template
+from server.mlflow_client import get_prompt_template, list_prompts
 from server.templates import render_template, parse_system_user
 from server.mlflow_helpers import configure_mlflow, get_experiment_id, experiment_url as make_experiment_url, get_mlflow_client, EXPERIMENT_NAME
-from server.llm import call_model
+from server.llm import call_model, EvalAbortError, TokenLimitError, RateLimitError
 from server.warehouse import list_eval_tables, get_table_columns, read_table_rows, count_table_rows
-from server.evaluation import mlflow_genai_evaluate
+from server.evaluation import mlflow_genai_evaluate, _extract_row_scores
 from server.settings import get_effective_config
 
 logger = logging.getLogger(__name__)
@@ -82,16 +82,40 @@ async def api_list_experiments(catalog: str | None = None, schema: str | None = 
 
 
 @router.get("/experiments/prompts")
-async def api_get_experiment_prompts(experiment_name: str):
-    """Return distinct prompt names that have been run in the given experiment."""
+async def api_get_experiment_prompts(
+    experiment_name: str,
+    catalog: str = "main",
+    schema: str = "prompts",
+):
+    """Return prompt names associated with the given experiment.
+
+    Uses the _mlflow_experiment_ids tag on each prompt (set automatically
+    by MLflow when a prompt is evaluated, or by our app on creation).
+    Falls back to searching runs if no tag-based matches are found.
+    """
     try:
+        configure_mlflow()
         client = get_mlflow_client()
         experiment = client.get_experiment_by_name(experiment_name)
         if not experiment:
             return {"prompt_names": []}
+        exp_id = experiment.experiment_id
+
+        # Primary: filter prompts by _mlflow_experiment_ids tag
+        all_prompts = await asyncio.to_thread(list_prompts, catalog, schema)
+        tagged = sorted(
+            p["name"]
+            for p in all_prompts
+            if f",{exp_id}," in p.get("tags", {}).get("_mlflow_experiment_ids", "")
+        )
+        if tagged:
+            return {"prompt_names": tagged}
+
+        # Fallback: search runs for prompt_name tags (covers older prompts
+        # that were evaluated before the tag-based approach was added)
         runs = await asyncio.to_thread(
             client.search_runs,
-            experiment_ids=[experiment.experiment_id],
+            experiment_ids=[exp_id],
             filter_string="tags.prompt_name != ''",
             max_results=1000,
         )
@@ -260,6 +284,94 @@ async def api_get_columns(catalog: str, schema: str, table: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/history")
+async def api_eval_history(
+    prompt_name: str,
+    prompt_version: str | None = None,
+    experiment_name: str | None = None,
+    limit: int = 10,
+):
+    """Return past batch eval runs for a prompt (optionally filtered to one version), newest first."""
+    try:
+        configure_mlflow()
+        client = get_mlflow_client()
+        exp_name = experiment_name or EXPERIMENT_NAME
+        exp = await asyncio.to_thread(client.get_experiment_by_name, exp_name)
+        if not exp:
+            return {"runs": []}
+
+        filter_parts = [
+            f"tags.prompt_name = '{prompt_name}'",
+            "tags.eval_type = 'batch'",
+        ]
+        if prompt_version is not None:
+            filter_parts.insert(1, f"tags.prompt_version = '{prompt_version}'")
+        filter_string = " AND ".join(filter_parts)
+
+        effective_limit = limit if prompt_version is not None else max(limit, 50)
+        runs = await asyncio.to_thread(
+            client.search_runs,
+            [exp.experiment_id],
+            filter_string,
+            max_results=effective_limit,
+            order_by=["attribute.start_time DESC"],
+        )
+
+        exp_url_base = make_experiment_url(exp.experiment_id)
+        result = []
+        for run in runs:
+            tags = run.data.tags
+            metrics = run.data.metrics
+            scorer = tags.get("scorer", "response_quality")
+
+            avg_score = None
+            for key in [f"{scorer}/mean", scorer, "response_quality/mean"]:
+                if key in metrics:
+                    avg_score = round(metrics[key], 2)
+                    break
+
+            result.append({
+                "run_id": run.info.run_id,
+                "run_name": run.info.run_name or "",
+                "created_at": run.info.start_time,
+                "avg_score": avg_score,
+                "model": tags.get("model", ""),
+                "dataset": tags.get("dataset", ""),
+                "scorer": scorer,
+                "prompt_version": tags.get("prompt_version", ""),
+                "total_rows": int(tags["total_rows"]) if tags.get("total_rows") else None,
+                "run_url": f"{exp_url_base}/runs/{run.info.run_id}",
+            })
+
+        return {"runs": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/run-traces")
+async def api_run_traces(run_id: str):
+    """Return per-row scores and rationales extracted from MLflow traces for a historical eval run."""
+    try:
+        configure_mlflow()
+        client = get_mlflow_client()
+        run = await asyncio.to_thread(client.get_run, run_id)
+        scorer_name = run.data.tags.get("scorer", "response_quality")
+        row_scores = await asyncio.to_thread(_extract_row_scores, run_id, scorer_name)
+
+        rows = []
+        for row_idx in sorted(row_scores.keys()):
+            score, rationale, details = row_scores[row_idx]
+            rows.append({
+                "row_index": row_idx,
+                "score": score,
+                "rationale": rationale,
+                "details": details,
+            })
+        return {"scorer": scorer_name, "rows": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/table-preview")
 async def api_table_preview(catalog: str, schema: str, table: str, limit: int = 20):
     """Return column names, a sample of rows, and total row count for the dataset preview UI."""
@@ -396,11 +508,24 @@ async def api_run_evaluation(request: EvalRequest):
                     system_prompt=rendered_system,
                 )
                 response_text = model_result["content"]
+            except EvalAbortError:
+                raise  # propagate to abort the entire eval
             except Exception as e:
                 response_text = f"[ERROR: {e}]"
         return (i, variables, rendered, rendered_system, response_text, expectations_val)
 
-    results_raw = await asyncio.gather(*[run_row(i, row) for i, row in enumerate(rows)])
+    try:
+        results_raw = await asyncio.gather(*[run_row(i, row) for i, row in enumerate(rows)])
+    except TokenLimitError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{e} Consider reducing the prompt length or the Max Rows setting "
+                "to stay within the model's context window."
+            ),
+        )
+    except RateLimitError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     sorted_results = sorted(results_raw)
     row_data: list[tuple[dict, str, str]] = [
         (variables, rendered, response_text)
@@ -414,32 +539,38 @@ async def api_run_evaluation(request: EvalRequest):
         if request.expectations_column else None
     )
 
+    # Skip mlflow evaluation if all rows errored (nothing useful to score)
+    all_errored = all(resp.startswith("[ERROR:") for _, _, resp in row_data)
+
     # Run mlflow.genai.evaluate() in a thread (all MLflow calls are synchronous)
     run_id = None
     exp_url = None
     row_scores: dict[int, tuple[float | str | None, str | None]] = {}
-    try:
-        run_name = f"eval-{request.prompt_name.split('.')[-1]}-v{request.prompt_version}"
-        run_id, row_scores = await asyncio.to_thread(
-            mlflow_genai_evaluate,
-            row_data,
-            request.model_name,
-            run_name,
-            request.prompt_name,
-            request.prompt_version,
-            dataset_full_name,
-            request.experiment_name,
-            request.scorer_name,
-            request.judge_model,
-            request.judge_temperature,
-            expectations_data,
-        )
-        if run_id:
-            exp_id = get_experiment_id(request.experiment_name)
-            if exp_id:
-                exp_url = make_experiment_url(exp_id)
-    except Exception as e:
-        logger.warning("MLflow eval failed (non-fatal): %s", e)
+    if all_errored:
+        logger.warning("All %d rows errored — skipping mlflow_genai_evaluate", len(row_data))
+    else:
+        try:
+            run_name = f"eval-{request.prompt_name.split('.')[-1]}-v{request.prompt_version}"
+            run_id, row_scores = await asyncio.to_thread(
+                mlflow_genai_evaluate,
+                row_data,
+                request.model_name,
+                run_name,
+                request.prompt_name,
+                request.prompt_version,
+                dataset_full_name,
+                request.experiment_name,
+                request.scorer_name,
+                request.judge_model,
+                request.judge_temperature,
+                expectations_data,
+            )
+            if run_id:
+                exp_id = get_experiment_id(request.experiment_name)
+                if exp_id:
+                    exp_url = make_experiment_url(exp_id)
+        except Exception as e:
+            logger.warning("MLflow eval failed (non-fatal): %s", e)
 
     # Build final results, merging in per-row scores extracted from traces
     results: list[EvalRowResult] = []
@@ -468,6 +599,15 @@ async def api_run_evaluation(request: EvalRequest):
                 except (ValueError, ZeroDivisionError):
                     pass
     avg_score = round(sum(numeric_scores) / len(numeric_scores), 2) if numeric_scores else None
+
+    # Log avg_score as a metric so eval history can find it for all scorer types
+    if run_id and avg_score is not None:
+        try:
+            scorer_key = request.scorer_name or "response_quality"
+            client = get_mlflow_client()
+            client.log_metric(run_id, f"{scorer_key}/mean", avg_score)
+        except Exception as e:
+            logger.warning("Failed to log avg_score metric (non-fatal): %s", e)
 
     return EvalResponse(
         prompt_name=request.prompt_name,

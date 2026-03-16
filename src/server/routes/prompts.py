@@ -6,15 +6,22 @@ with dots in names.
 """
 
 import asyncio
+import logging
+import os
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+import httpx
 from server.mlflow_client import (
     list_prompts,
     get_prompt_versions,
     get_prompt_template,
     create_prompt,
     create_prompt_version,
+    get_mlflow_client,
 )
+from server.mlflow_helpers import configure_mlflow
+
+logger = logging.getLogger(__name__)
 
 
 def _is_permission_error(detail: str) -> bool:
@@ -39,6 +46,37 @@ def _permission_error_detail(schema_ref: str, needs_manage: bool = False) -> str
         f"GRANT USE CATALOG ON CATALOG {schema_ref.split('.')[0]} TO `<service-principal-client-id>`;\n"
         f"GRANT USE SCHEMA ON SCHEMA {schema_ref} TO `<service-principal-client-id>`;"
     )
+
+async def _register_prompt_in_experiment(prompt_name: str, experiment_name: str) -> None:
+    """Tag the prompt with the experiment ID so it shows in the experiment-filtered view."""
+    configure_mlflow()
+    client = get_mlflow_client()
+    experiment = client.get_experiment_by_name(experiment_name)
+    if not experiment:
+        return
+    exp_id = experiment.experiment_id
+
+    # Read existing experiment IDs tag (comma-delimited, e.g. ",123,456,")
+    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    token = os.environ.get("DATABRICKS_TOKEN", "")
+    if not host or not token:
+        # Fall back to mlflow config
+        import mlflow
+        host = mlflow.get_tracking_uri().replace("databricks", os.environ.get("DATABRICKS_HOST", ""))
+        token = os.environ.get("DATABRICKS_TOKEN", "")
+    if not host or not token:
+        logger.warning("Cannot set experiment tag: no DATABRICKS_HOST/TOKEN")
+        return
+
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{host}/api/2.0/mlflow/unity-catalog/prompts/{prompt_name}/tags"
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(url, headers=headers, json={
+            "key": "_mlflow_experiment_ids",
+            "value": f",{exp_id},",
+        })
+        resp.raise_for_status()
+
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
@@ -95,6 +133,7 @@ class CreatePromptRequest(BaseModel):
     name: str
     template: str
     description: str = ""
+    experiment_name: str = ""
 
 
 class CreateVersionRequest(BaseModel):
@@ -116,6 +155,14 @@ async def api_create_prompt(request: CreatePromptRequest):
             template=request.template,
             description=request.description,
         )
+        # Register prompt in the experiment so it shows in the filtered list
+        if request.experiment_name:
+            try:
+                await _register_prompt_in_experiment(
+                    request.name.strip(), request.experiment_name
+                )
+            except Exception as e:
+                logger.warning("Failed to register prompt in experiment (non-fatal): %s", e)
         return result
     except Exception as e:
         detail = str(e)

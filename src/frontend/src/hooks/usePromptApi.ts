@@ -100,7 +100,7 @@ export function usePromptTemplate(name: string | null, version: string | null) {
 
 export function useCreatePrompt() {
   const { mutate: create, loading, error } = useMutation(
-    (params: { name: string; template: string; description?: string }) =>
+    (params: { name: string; template: string; description?: string; experiment_name?: string }) =>
       apiFetch<CreatePromptResponse>('/prompts', {
         method: 'POST',
         body: JSON.stringify(params),
