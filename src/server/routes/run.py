@@ -128,63 +128,54 @@ async def api_run_prompt(request: RunRequest):
             mlflow.log_param("model_name", request.model_name)
             mlflow.log_param("prompt_version", request.prompt_version)
 
-            # Trace the LLM call as a span so it shows in the Traces tab.
-            # Use run_name as span name — MLflow uses root span name for the Trace name column.
-            with mlflow.start_span(name=run_name, span_type="CHAT_MODEL") as span:
-                # Link prompt so Prompt + Version columns populate in the Traces UI.
-                # mlflow.load_prompt() inside an active span auto-registers the link.
-                if request.draft_template is None:
-                    try:
-                        mlflow.load_prompt(request.prompt_name, version=request.prompt_version)
-                    except Exception as e:
-                        logger.debug("load_prompt for trace linking failed (non-fatal): %s", e)
+            # call_model() uses the OpenAI SDK — mlflow.openai.autolog()
+            # automatically creates a traced span with token usage, latencies,
+            # and structured inputs/outputs. No manual span plumbing needed.
+            try:
+                result = await call_model(
+                    endpoint_name=request.model_name,
+                    prompt=rendered,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    system_prompt=rendered_system,
+                )
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
 
-                span.set_attribute("mlflow.llm.model", request.model_name)
-                span_inputs = {"model": request.model_name}
-                if rendered_system:
-                    span_inputs["system_prompt"] = rendered_system
-                span_inputs["user_prompt"] = rendered
-                span.set_inputs(span_inputs)
+            # The autolog span has closed — get the trace ID it produced.
+            # Flush async trace logging so the trace exists on the server
+            # before we try to set tags on it.
+            trace_id = mlflow.get_last_active_trace_id()
+            if trace_id:
+                mlflow.flush_trace_async_logging(terminate=False)
+
+            # Set request/response previews so they show in the Traces UI.
+            if trace_id:
                 try:
-                    result = await call_model(
-                        endpoint_name=request.model_name,
-                        prompt=rendered,
-                        max_tokens=request.max_tokens,
-                        temperature=request.temperature,
-                        system_prompt=rendered_system,
+                    get_mlflow_client().set_trace_tag(
+                        trace_id, "mlflow.traceRequestPreview", rendered[:200]
+                    )
+                    get_mlflow_client().set_trace_tag(
+                        trace_id, "mlflow.traceResponsePreview", result["content"][:200]
+                    )
+                except Exception:
+                    pass
+
+            # Set the mlflow.linkedPrompts trace tag so the prompt version
+            # appears in the Prompt column of the Traces UI.
+            # The REST API (link_prompt_versions_to_trace) does not populate
+            # this tag, so we must set it manually.
+            if request.draft_template is None and trace_id:
+                try:
+                    prompt_link = json.dumps([{
+                        "name": request.prompt_name,
+                        "version": request.prompt_version,
+                    }])
+                    get_mlflow_client().set_trace_tag(
+                        trace_id, "mlflow.linkedPrompts", prompt_link
                     )
                 except Exception as e:
-                    span.set_status("ERROR")
-                    raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
-                usage = result.get("usage", {})
-                span.set_outputs({"response": result["content"], "usage": usage})
-                # Set token usage using MLflow's expected key names
-                if usage:
-                    span.set_attribute("mlflow.chat.tokenUsage", {
-                        "input_tokens": usage.get("prompt_tokens", 0),
-                        "output_tokens": usage.get("completion_tokens", 0),
-                        "total_tokens": usage.get("total_tokens", 0),
-                    })
-                mlflow.update_current_trace(
-                    request_preview=rendered[:200],
-                    response_preview=result["content"][:200],
-                )
-
-                # Set the mlflow.linkedPrompts trace tag so the prompt version
-                # appears in the "Linked prompts" tab in the Databricks Traces UI.
-                # The REST API (LinkPromptVersionsToTraces) does not populate this tag,
-                # so we must set it manually. See: https://databricks.slack.com/archives/C083A8HQC6N/p1765414094281199
-                if request.draft_template is None:
-                    try:
-                        prompt_link = json.dumps([{
-                            "name": request.prompt_name,
-                            "version": request.prompt_version,
-                        }])
-                        get_mlflow_client().set_trace_tag(
-                            span.request_id, "mlflow.linkedPrompts", prompt_link
-                        )
-                    except Exception as e:
-                        logger.warning("set_trace_tag mlflow.linkedPrompts failed (non-fatal): %s", e)
+                    logger.warning("set_trace_tag mlflow.linkedPrompts failed (non-fatal): %s", e)
 
             _log_run_artifacts(run.info.run_id, rendered, rendered_system, result, request)
 
