@@ -161,11 +161,23 @@ async def api_run_prompt(request: RunRequest):
                 except Exception:
                     pass
 
-            # Set the mlflow.linkedPrompts trace tag so the prompt version
-            # appears in the Prompt column of the Traces UI.
-            # The REST API (link_prompt_versions_to_trace) does not populate
-            # this tag, so we must set it manually.
+            # Link prompt version to the trace so it appears in the Version
+            # column of the Traces UI.  We use the REST API first, then also
+            # set the tag manually as a fallback (the API previously broke the
+            # drill-down link — if that regresses, remove the API call).
             if request.draft_template is None and trace_id:
+                try:
+                    client = get_mlflow_client()
+                    pv = client.get_prompt_version(
+                        name=request.prompt_name,
+                        version=request.prompt_version,
+                    )
+                    client.link_prompt_versions_to_trace(
+                        prompt_versions=[pv],
+                        trace_id=trace_id,
+                    )
+                except Exception as e:
+                    logger.warning("link_prompt_versions_to_trace failed (non-fatal): %s", e)
                 try:
                     prompt_link = json.dumps([{
                         "name": request.prompt_name,
